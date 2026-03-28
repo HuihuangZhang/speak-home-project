@@ -228,7 +228,7 @@ make test-e2e        # Playwright E2E
 
 ## Thinking
 
-### 10,000 concurrent sessions
+### 10K concurrent sessions
 
 The current architecture is designed for simplicity, not scale. Supporting 10k concurrent sessions requires addressing each layer in order — fixing a downstream bottleneck without fixing upstream ones gives no benefit.
 
@@ -279,19 +279,118 @@ At this scale, problems cannot be debugged manually from stdout logs. You'd need
 
 The database and agent worker are the two foundational changes — nothing else matters until those are addressed.
 
+## Tradeoff analysis & key decisions
 
-## SQLite Shortcomings
+### 1. SQLite as the database(For MVP home project)
 
-SQLite is used for the MVP to eliminate infrastructure dependencies. Be aware of the following limitations before moving to production:
+Decision: Use SQLite for the MVP to eliminate infrastructure setup. And as document metioned.
 
-| Limitation | Impact |
-|---|---|
-| **Single writer** | Concurrent writes serialize even in WAL mode. The API and Agent Worker both write, which can cause lock contention under load. |
-| **No network sharing** | SQLite is a file. You cannot run two backend instances (on different machines or containers) pointing to the same database. This prevents horizontal scaling. |
-| **No connection pooling** | Each process holds its own connection. SQLAlchemy's `NullPool` is recommended for async SQLite to avoid connection reuse issues. |
-| **Manual backups** | No built-in replication or point-in-time recovery. Backup = `cp speakhome.db speakhome.db.bak`. |
-| **No row-level locking** | SQLite locks at the table level for writes, not the row level. |
-| **WAL mode not supported for in-memory DB** | The `sqlite+aiosqlite:///:memory:` URL used in tests cannot use WAL mode. Production file-based SQLite uses WAL correctly. |
+Zero config, no Docker dependency just for a database, works out of the box for local dev, trivially easy to test with an in-memory DB per test run. The migration to PostgreSQL is one line — `DATABASE_URL` in `.env`. SQLAlchemy + Alembic abstract the engine entirely, so this was a deliberate bet that simplicity is worth more than scalability at MVP stage.
+
+Tradeoff: Can't run more than one process pointing at the same file on different machines, table-level write locking, no connection pooling. 
+
+---
+
+### 2. DB as the contract between API and Agent Worker
+
+Decision: The API and Agent Worker never call each other. They share only the database.
+
+```python
+# Agent reads session context from DB on job start — no API call needed
+async with AsyncSessionLocal() as db:
+    context = await load_session_context(db=db, session_id=session_id)
+```
+
+Complete deployment independence — the two services can restart, crash, or scale independently. No internal HTTP calls to version or secure. Each service is easy to test in isolation.
+
+Tradeoff: The DB becomes a coupling point. Schema changes must be coordinated across both services. There is also no event system — the API cannot notify the agent of anything except through DB state changes.
+
+---
+
+### 3. LiveKit for voice infrastructure(For MVP home project)
+
+Decision: Delegate all real-time audio entirely to LiveKit Cloud — WebRTC signaling, SFU routing, and agent job dispatch.
+
+No WebRTC infrastructure to build or operate. LiveKit handles NAT traversal, codec negotiation, and job dispatch. The agent worker connects to a room the same way any other participant would.
+
+Tradeoff: Hard external dependency — if LiveKit is down, the entire voice feature is down. The full voice pipeline cannot be unit-tested in isolation; only integration tests against a real LiveKit room give end-to-end coverage.
+
+---
+
+### 4. Three separate AI providers in the pipeline
+
+Decision: Silero (VAD) → Deepgram (STT) → OpenAI (LLM + TTS), rather than a single all-in-one API.
+
+```python
+session = AgentSession(
+    vad=silero.VAD.load(),          # runs locally — no API call, no latency, no cost
+    stt=deepgram.STT(...),          # real-time STT, better accuracy than Whisper
+    llm=openai.LLM(model="gpt-4o-mini", ...),
+    tts=openai.TTS(...),
+)
+```
+
+Each component is independently best-in-class and independently replaceable. Silero VAD runs locally so voice activity detection adds zero latency and zero cost.
+
+Tradeoff: Three API keys to manage, three independent failure modes, three rate-limit concerns. A Deepgram outage breaks voice even when OpenAI is healthy.
+
+---
+
+### 5. Session resumability with PAUSED state
+
+Decision: When a participant disconnects, the session enters `PAUSED` state and waits `SESSION_PAUSE_TIMEOUT_MINUTES` for a reconnect before completing.
+
+```python
+await asyncio.shield(asyncio.sleep(pause_timeout))
+# if still PAUSED after timeout → COMPLETED + generate_summary
+```
+
+Network blips or accidental tab closes don't destroy a session. The user can reconnect and continue with the same agent context. `asyncio.shield` is used deliberately — without it, a LiveKit job cancellation during disconnect would abort the pause timer before it could fire.
+
+Tradeoff: The agent worker process stays alive and holds the LiveKit room open for the full pause timeout on every disconnect. At scale, many idle paused sessions consume worker slots that could serve active sessions.
+
+---
+
+### 6. Sync OpenAI client for summary generation
+
+Decision: `summary.py` uses the synchronous `OpenAI` client wrapped in `asyncio.to_thread`, rather than `AsyncOpenAI`.
+
+```python
+# Module-level sync client — patched in unit tests via
+# `patch("agent.summary.openai_client.chat.completions.create", ...)`
+openai_client = OpenAI(api_key=settings.openai_api_key)
+```
+
+Benefit: patching a sync method in unit tests is straightforward. Patching an async method requires `AsyncMock` and more test boilerplate.
+
+Tradeoff: `asyncio.to_thread` spawns a thread for every summary call. For an MVP with low concurrency this is negligible, but it is slightly less efficient than a native async client.
+
+---
+
+### 7. Summary can be triggered from two code paths
+
+Decision: `generate_summary` is called from both the API route (when the user explicitly ends a session) and the agent worker (when the pause timeout expires).
+
+Potential problem: If a user clicks "end session" from the frontend while the agent's pause timer also fires, both paths call `generate_summary` for the same `session_id`. The second `db.add(summary)` will fail on the `UNIQUE` constraint on `session_id` in the `summaries` table — the exception is caught and logged as "failed", so there is no crash, but an OpenAI API call is wasted and a misleading error appears in the logs.
+
+Fix if needed: Add a `SELECT` check for an existing summary before calling OpenAI — abort early if one is already present or in-progress.
+
+---
+
+### 8. Context window hard-capped at 40 messages
+
+Decision: `load_session_context` loads only the last 40 messages when rebuilding the LLM's conversation history.
+
+```python
+.order_by(Message.id.desc()).limit(40)
+```
+
+Predictable token usage and LLM cost. Prevents context overflow on long sessions. It'd be better to use a more efficient context window management strategy.(e.g. "Context Engineering" technique)
+
+Tradeoff: Older coaching context is dropped silently. The structured `exercise_plan` (stored separately as JSON on the `Session` row) always survives — it is re-injected into the system prompt on reconnect — but nuances from older messages do not. This is a trade-off between context window size and LLM cost.
+
+
+---
 
 ## Upgrading to PostgreSQL
 
