@@ -33,3 +33,4 @@ e2e/playwright-report/
 
 # OS
 .DS_Store
+*.log

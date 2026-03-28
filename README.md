@@ -91,6 +91,8 @@ cd frontend && npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+**Note:** You can register account with any email and password (e.g. "test@test.com" and "test"), and then login with the email and password.
+
 #### Production
 
 Use Docker Compose (see [Docker Deployment](#docker-deployment) below) — it handles process management, startup ordering, migrations, and shared state automatically:
