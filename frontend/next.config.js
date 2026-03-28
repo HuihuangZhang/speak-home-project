@@ -24,6 +24,9 @@ function loadRootEnv() {
 loadRootEnv();
 
 const nextConfig = {
+  // Produces a self-contained bundle in .next/standalone — used by the Docker image.
+  // Has no effect on `next dev` or a regular `next build` outside Docker.
+  output: "standalone",
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
     NEXT_PUBLIC_LIVEKIT_URL: process.env.NEXT_PUBLIC_LIVEKIT_URL || process.env.LIVEKIT_URL || "",

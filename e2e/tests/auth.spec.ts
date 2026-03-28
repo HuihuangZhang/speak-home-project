@@ -18,7 +18,9 @@ test("register with duplicate email shows error", async ({ page }) => {
   await page.getByLabel("Password").fill("StrongPass123!");
   await page.getByRole("button", { name: "Register" }).click();
 
-  await expect(page.getByRole("alert")).toContainText(/already registered/i);
+  await expect(
+    page.getByRole("alert").filter({ hasText: /already registered/i })
+  ).toBeVisible();
 });
 
 test("login with wrong password shows error", async ({ page }) => {
@@ -29,7 +31,9 @@ test("login with wrong password shows error", async ({ page }) => {
   await page.getByLabel("Password").fill("WrongPassword!");
   await page.getByRole("button", { name: "Login" }).click();
 
-  await expect(page.getByRole("alert")).toContainText(/invalid credentials/i);
+  await expect(
+    page.getByRole("alert").filter({ hasText: /invalid credentials/i })
+  ).toBeVisible();
   await expect(page).not.toHaveURL(/\/dashboard/);
 });
 
