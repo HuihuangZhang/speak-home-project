@@ -4,16 +4,26 @@ A real-time voice AI fitness coach powered by LiveKit. Talk to Alex, your person
 
 ## Architecture
 
+The system has three services. The **Next.js frontend** handles the voice UI and calls the **FastAPI backend** over HTTP for auth, session lifecycle, and LiveKit tokens. Once connected, all real-time audio flows exclusively through **LiveKit** — the browser publishes microphone audio via WebRTC, and the **Agent Worker** receives it, runs it through a VAD → STT → LLM → TTS pipeline, and publishes the synthesised voice back. The API and Agent Worker never call each other; they coordinate through a shared SQLite database.
+
 ```
-frontend/          Next.js (voice UI, session management)
-backend/
-  api/             FastAPI (auth, session CRUD, LiveKit tokens)
-  agent/           LiveKit Agent Worker (voice pipeline, AI tutor)
-  shared/          SQLAlchemy models, config (shared by api + agent)
-e2e/               Playwright end-to-end tests
+Browser
+  │  HTTP/JSON (auth, sessions, summaries)
+  │◄──────────────────────────────────────► FastAPI        ──► SQLite ◄──
+  │                                              │                        │
+  │  WebRTC audio (via LiveKit SFU)              │ HTTPS Twirp            │
+  │◄──────────────────────────────────────►  LiveKit  ◄──► Agent Worker ──┘
+                                            (Cloud SFU)    VAD → STT → LLM → TTS
+                                                           (Silero/Deepgram/OpenAI)
 ```
 
-Both the API and the Agent Worker share the same SQLite database. They do not call each other — the DB is the contract between them.
+| Directory | Role |
+|-----------|------|
+| `frontend/` | Next.js — voice UI, session management |
+| `backend/api/` | FastAPI — auth, session CRUD, LiveKit token minting |
+| `backend/agent/` | LiveKit Agent Worker — real-time voice pipeline, AI tutor |
+| `backend/shared/` | SQLAlchemy models and config shared by API + agent |
+| `e2e/` | Playwright end-to-end tests |
 
 ## Setup
 
@@ -60,22 +70,57 @@ npm install
 cd ..
 ```
 
-### 6. Run (3 terminals)
+### 6. Run
+
+#### Development
+
+Three processes, each with live-reload:
 
 ```bash
-# Terminal 1: FastAPI
+# Terminal 1: FastAPI (auto-reloads on code changes)
 source .venv/bin/activate
 cd backend && uvicorn api.main:app --reload --port 8000
 
-# Terminal 2: LiveKit Agent Worker
+# Terminal 2: LiveKit Agent Worker (dev mode — connects to LiveKit Cloud)
 source .venv/bin/activate
-cd backend && python -m agent.worker dev   # use 'start' in production
+cd backend && python -m agent.worker dev
 
-# Terminal 3: Frontend
+# Terminal 3: Next.js (auto-reloads on code changes)
 cd frontend && npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+#### Production
+
+Use Docker Compose (see [Docker Deployment](#docker-deployment) below) — it handles process management, startup ordering, migrations, and shared state automatically:
+
+```bash
+cp .env.example .env   # fill in all values
+docker compose up --build -d
+```
+
+If you prefer running processes directly (e.g. on a VM without Docker):
+
+```bash
+# 1. Run database migrations once
+source .venv/bin/activate
+cd backend && alembic upgrade head
+
+# 2. FastAPI — run with a multi-worker production server
+#    Replace 4 with your CPU core count (2× cores is a common starting point)
+source .venv/bin/activate
+cd backend && uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 4
+
+# 3. LiveKit Agent Worker — 'start' (not 'dev') registers with LiveKit for production dispatch
+source .venv/bin/activate
+cd backend && python -m agent.worker start
+
+# 4. Next.js — build once, then serve
+cd frontend && npm run build && npm start
+```
+
+> **Note:** In production, place a reverse proxy (nginx, Caddy, or a cloud load balancer) in front of the API and frontend. Configure TLS termination there. Update `allow_origins` in `backend/api/main.py` to match your production domain.
 
 ## Environment Variables
 
@@ -149,13 +194,6 @@ docker compose build frontend
 docker compose up -d --no-deps frontend
 ```
 
-### Image sizes (approximate)
-
-| Image | Size |
-|-------|------|
-| `speak-home-project-backend` | ~3 GB (PyTorch + FFmpeg for Silero VAD) |
-| `speak-home-project-frontend` | ~150 MB (Next.js standalone bundle) |
-
 ---
 
 ## Testing
@@ -187,6 +225,60 @@ make test-e2e        # Playwright E2E
 ```
 
 ---
+
+## Thinking
+
+### 10,000 concurrent sessions
+
+The current architecture is designed for simplicity, not scale. Supporting 10k concurrent sessions requires addressing each layer in order — fixing a downstream bottleneck without fixing upstream ones gives no benefit.
+
+#### 1. Database: SQLite → PostgreSQL (foundational blocker)
+
+SQLite is a file. You cannot run multiple API or agent replicas on different machines pointing at the same file, and it serializes all writes under load. Everything else below depends on this being fixed first.
+
+Change one line in `.env` (see [Upgrading to PostgreSQL](#upgrading-to-postgresql) below). At 10k sessions, also add **PgBouncer** in front of PostgreSQL — each API and agent replica holds its own connection pool, and without a pooler you'd exhaust Postgres's connection limit quickly.
+
+#### 2. Agent Worker: horizontal scale-out
+
+Each active session runs a full VAD → STT → LLM → TTS pipeline in the agent worker process, which is CPU and memory intensive. A single process cannot handle thousands of concurrent pipelines.
+
+The good news: `python -m agent.worker start` already registers with LiveKit's job dispatch system, which load-balances across all registered workers automatically. Scaling out is just running more replicas — no code changes needed.
+
+The real bottleneck shifts to **external API rate limits**. At 10k concurrent sessions you'd be calling Deepgram (STT) and OpenAI (LLM + TTS) simultaneously at very high throughput. This requires enterprise-tier API contracts or replacing cloud providers with self-hosted models. Silero VAD runs in-process on CPU, so at high concurrency you'd also need GPU-backed worker containers or a cloud VAD service.
+
+#### 3. API service: multiple replicas behind a load balancer
+
+The single `uvicorn` process becomes a bottleneck for session creation bursts (e.g. all users starting sessions at once). Run multiple API replicas behind a load balancer (nginx, AWS ALB, etc.).
+
+Additionally, session creation currently calls LiveKit's `CreateRoom` + `CreateDispatch` synchronously inside the HTTP request. Under burst traffic this creates a latency spike. Moving LiveKit provisioning into an **async task queue** (Celery, ARQ) would decouple the API response time from LiveKit's response time.
+
+Similarly, **summary generation** runs synchronously at session end inside the agent worker. At 10k sessions completing around the same time, this creates a thundering herd of OpenAI calls. Summaries should be enqueued as background jobs instead.
+
+#### 4. LiveKit: capacity and clustering
+
+LiveKit Cloud scales automatically, but 10k concurrent rooms requires a paid plan that supports the needed room count and bandwidth. If self-hosting LiveKit, a single SFU node has a ceiling — you'd need a clustered deployment with a load-balanced set of SFU nodes, which is a significant infrastructure project.
+
+#### 5. Observability
+
+At this scale, problems cannot be debugged manually from stdout logs. You'd need:
+- **Structured logging** shipped to a log aggregator (Datadog, Loki, etc.)
+- **Distributed tracing** to correlate a browser request → API → LiveKit dispatch → agent job
+- **Metrics** on queue depth, session creation latency, LLM response times, and error rates
+
+#### Summary
+
+| Layer | Current (MVP) | At 10k sessions |
+|-------|--------------|-----------------|
+| Database | SQLite (single file) | PostgreSQL + PgBouncer |
+| Agent Worker | 1 process | N replicas, autoscaled |
+| API | 1 uvicorn process | N replicas behind a load balancer |
+| Session creation | Sync HTTP to LiveKit | Async task queue |
+| Summary generation | Inline sync OpenAI call | Background job queue |
+| LiveKit | Cloud (any tier) | Paid plan or self-hosted cluster |
+| Observability | stdout logs | Structured logging + tracing + metrics |
+
+The database and agent worker are the two foundational changes — nothing else matters until those are addressed.
+
 
 ## SQLite Shortcomings
 

@@ -18,7 +18,7 @@ from livekit.agents import (
 )
 from livekit.plugins import deepgram, openai, silero
 
-from agent.tutor import SYSTEM_PROMPT, load_session_context, parse_dispatch_metadata
+from agent.tutor import SYSTEM_PROMPT, load_session_context, parse_dispatch_metadata, save_transcript_turn
 from agent.tools import get_user_fitness_history, log_session_note, save_exercise_plan
 from agent.summary import generate_summary
 from shared.config import settings
@@ -118,6 +118,31 @@ async def entrypoint(ctx: JobContext) -> None:
     await session.start(agent, room=ctx.room)
     logger.info("Agent session started | session_id=%d room=%s", session_id, ctx.room.name)
 
+    # Persist every finalized conversation turn (user + assistant) to the messages table.
+    # conversation_item_added fires once per ChatMessage after speech is committed.
+    @session.on("conversation_item_added")
+    def on_conversation_item_added(event) -> None:
+        item = event.item
+        if not isinstance(item, llm.ChatMessage):
+            return  # skip function_call / function_call_output items
+        if item.role not in ("user", "assistant"):
+            return  # skip system messages
+        if item.interrupted:
+            return  # skip partial agent utterances that were cut off
+        text = item.text_content
+        if not text:
+            return
+
+        async def _persist() -> None:
+            async with AsyncSessionLocal() as db:
+                await save_transcript_turn(db=db, session_id=session_id, role=item.role, content=text)
+
+        asyncio.create_task(_persist())
+        logger.debug(
+            "conversation_item_added → persisting | session_id=%d role=%s chars=%d",
+            session_id, item.role, len(text),
+        )
+
     greeting = (
         "Welcome back! Let's pick up where we left off."
         if context["messages"]
@@ -149,7 +174,11 @@ async def entrypoint(ctx: JobContext) -> None:
                 "Waiting %ds for reconnect | session_id=%d",
                 pause_timeout, session_id,
             )
-            await asyncio.sleep(pause_timeout)
+            # Shield the sleep so LiveKit job cancellation doesn't abort the timeout
+            try:
+                await asyncio.shield(asyncio.sleep(pause_timeout))
+            except asyncio.CancelledError:
+                logger.info("_handle_pause shielded — continuing after cancel | session_id=%d", session_id)
 
             # Check if still paused (user might have reconnected)
             async with AsyncSessionLocal() as db:
@@ -159,9 +188,13 @@ async def entrypoint(ctx: JobContext) -> None:
                     session_obj.status = SessionStatus.COMPLETED
                     session_obj.ended_at = datetime.now(timezone.utc)
                     await db.commit()
-                    await generate_summary(db=db, session_id=session_id)
                 else:
                     logger.info("Session reconnected or already completed | session_id=%d", session_id)
+                    return
+
+            # Run summary in a fresh task so it outlives any room disconnect
+            asyncio.ensure_future(generate_summary(session_id=session_id))
+            logger.info("generate_summary scheduled | session_id=%d", session_id)
 
             await ctx.room.disconnect()
 

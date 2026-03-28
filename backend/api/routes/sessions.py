@@ -291,14 +291,5 @@ async def end_session(
     # Trigger summary generation as a background task
     from agent.summary import generate_summary  # avoid circular at module level
 
-    background_tasks.add_task(_run_summary, session_id)
+    background_tasks.add_task(generate_summary, session_id)
     return {"status": "completed"}
-
-
-async def _run_summary(session_id: int) -> None:
-    """Run summary generation with its own DB session."""
-    from agent.summary import generate_summary
-    from shared.db import AsyncSessionLocal
-
-    async with AsyncSessionLocal() as db:
-        await generate_summary(db=db, session_id=session_id)

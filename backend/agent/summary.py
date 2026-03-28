@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 
 from openai import OpenAI
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.config import settings
+from shared.db import AsyncSessionLocal
 from shared.models import Message, Summary
 
 logger = logging.getLogger(__name__)
@@ -33,55 +33,56 @@ def build_summary_prompt(messages: list[dict]) -> str:
     )
 
 
-async def generate_summary(db: AsyncSession, session_id: int) -> None:
+async def generate_summary(session_id: int) -> None:
     """Generate a post-session summary and persist it. Never raises."""
     logger.info("generate_summary started | session_id=%d", session_id)
-    try:
-        # Fetch full transcript
-        result = await db.execute(
-            select(Message)
-            .where(Message.session_id == session_id)
-            .order_by(Message.created_at.asc())
-        )
-        messages = result.scalars().all()
-        logger.info("generate_summary | session_id=%d transcript_messages=%d", session_id, len(messages))
+    async with AsyncSessionLocal() as db:
+        try:
+            # Fetch full transcript
+            result = await db.execute(
+                select(Message)
+                .where(Message.session_id == session_id)
+                .order_by(Message.created_at.asc())
+            )
+            messages = result.scalars().all()
+            logger.info("generate_summary | session_id=%d transcript_messages=%d", session_id, len(messages))
 
-        prompt = build_summary_prompt(
-            [{"role": m.role, "content": m.content} for m in messages]
-        )
+            prompt = build_summary_prompt(
+                [{"role": m.role, "content": m.content} for m in messages]
+            )
 
-        logger.info("generate_summary calling OpenAI | session_id=%d prompt_chars=%d", session_id, len(prompt))
-        # Call OpenAI synchronously in a thread pool so unit-test mocks work
-        response = await asyncio.to_thread(
-            openai_client.chat.completions.create,
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
-        content = json.loads(response.choices[0].message.content)
-        logger.info(
-            "generate_summary OpenAI response | session_id=%d exercises=%d notes=%d recommendations=%d",
-            session_id,
-            len(content.get("exercises", [])),
-            len(content.get("coaching_notes", [])),
-            len(content.get("next_recommendations", [])),
-        )
+            logger.info("generate_summary calling OpenAI | session_id=%d promp=%s", session_id, prompt)
+            # Call OpenAI synchronously in a thread pool so unit-test mocks work
+            response = await asyncio.to_thread(
+                openai_client.chat.completions.create,
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+            )
+            content = json.loads(response.choices[0].message.content)
+            logger.info(
+                "generate_summary OpenAI response | session_id=%d exercises=%d notes=%d recommendations=%d",
+                session_id,
+                len(content.get("exercises", [])),
+                len(content.get("coaching_notes", [])),
+                len(content.get("next_recommendations", [])),
+            )
 
-        summary = Summary(
-            session_id=session_id,
-            exercises_covered=content.get("exercises", []),
-            coaching_notes=", ".join(content.get("coaching_notes", [])),
-            next_session_recommendations=", ".join(
-                content.get("next_recommendations", [])
-            ),
-            status="done",
-            generated_at=datetime.now(timezone.utc),
-        )
-        logger.info("generate_summary done | session_id=%d", session_id)
-    except Exception as exc:
-        logger.error("generate_summary failed | session_id=%d error=%s", session_id, exc, exc_info=True)
-        summary = Summary(session_id=session_id, status="failed")
+            summary = Summary(
+                session_id=session_id,
+                exercises_covered=content.get("exercises", []),
+                coaching_notes=", ".join(content.get("coaching_notes", [])),
+                next_session_recommendations=", ".join(
+                    content.get("next_recommendations", [])
+                ),
+                status="done",
+                generated_at=datetime.now(timezone.utc),
+            )
+            logger.info("generate_summary done | session_id=%d", session_id)
+        except Exception as exc:
+            logger.error("generate_summary failed | session_id=%d error=%s", session_id, exc, exc_info=True)
+            summary = Summary(session_id=session_id, status="failed")
 
-    db.add(summary)
-    await db.commit()
-    logger.info("generate_summary committed | session_id=%d status=%s", session_id, summary.status)
+        db.add(summary)
+        await db.commit()
+        logger.info("generate_summary committed | session_id=%d status=%s", session_id, summary.status)
