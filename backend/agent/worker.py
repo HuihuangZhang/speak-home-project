@@ -118,6 +118,15 @@ async def entrypoint(ctx: JobContext) -> None:
     await session.start(agent, room=ctx.room)
     logger.info("Agent session started | session_id=%d room=%s", session_id, ctx.room.name)
 
+    # Log every STT word/phrase as it arrives from LiveKit (partial and final).
+    # This is the earliest point you can see what the user said.
+    @session.on("user_input_transcribed")
+    def on_user_input_transcribed(event) -> None:
+        logger.info(
+            "STT transcript | session_id=%d is_final=%s text=%r",
+            session_id, event.is_final, event.transcript,
+        )
+
     # Persist every finalized conversation turn (user + assistant) to the messages table.
     # conversation_item_added fires once per ChatMessage after speech is committed.
     @session.on("conversation_item_added")
@@ -138,9 +147,9 @@ async def entrypoint(ctx: JobContext) -> None:
                 await save_transcript_turn(db=db, session_id=session_id, role=item.role, content=text)
 
         asyncio.create_task(_persist())
-        logger.debug(
-            "conversation_item_added → persisting | session_id=%d role=%s chars=%d",
-            session_id, item.role, len(text),
+        logger.info(
+            "conversation_item_added → persisting | session_id=%d role=%s text=%r",
+            session_id, item.role, text,
         )
 
     greeting = (
