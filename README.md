@@ -92,6 +92,72 @@ Open [http://localhost:3000](http://localhost:3000).
 | `DATABASE_URL` | SQLAlchemy DB URL (default: `sqlite+aiosqlite:///./speakhome.db`) |
 | `SESSION_PAUSE_TIMEOUT_MINUTES` | Minutes to wait before ending a paused session (default: `5`) |
 
+## Docker Deployment
+
+All three services (FastAPI, Agent Worker, Next.js) are containerised.
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) with the Compose plugin (`docker compose`)
+- A filled-in `.env` file (see setup step 2 above)
+
+### Build and start
+
+```bash
+# First run — builds images and starts containers
+docker compose up --build
+
+# Subsequent runs (images already built)
+docker compose up
+
+# Detached (background)
+docker compose up -d
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+### Services
+
+| Service | Container port → host port | Notes |
+|---------|---------------------------|-------|
+| `api` | 8000 → 8000 | Runs `alembic upgrade head` on startup |
+| `agent` | — | Starts after `api` is healthy |
+| `frontend` | 3000 → 3000 | Starts after `api` is healthy |
+
+### Volumes
+
+| Volume | Purpose |
+|--------|---------|
+| `db_data` | SQLite database file shared between `api` and `agent` at `/data/speakhome.db` |
+| `agent_cache` | Silero VAD model cache — avoids re-downloading on restart |
+
+### Tear down
+
+```bash
+docker compose down          # stop containers, keep volumes
+docker compose down -v       # stop containers and delete volumes (wipes DB)
+```
+
+### Build arguments
+
+The frontend's `NEXT_PUBLIC_*` variables are baked into the JS bundle at build time.
+They are read from your `.env` file automatically by `docker compose`.
+If you need to change them after building, rebuild with:
+
+```bash
+docker compose build frontend
+docker compose up -d --no-deps frontend
+```
+
+### Image sizes (approximate)
+
+| Image | Size |
+|-------|------|
+| `speak-home-project-backend` | ~3 GB (PyTorch + FFmpeg for Silero VAD) |
+| `speak-home-project-frontend` | ~150 MB (Next.js standalone bundle) |
+
+---
+
 ## Testing
 
 ```bash
