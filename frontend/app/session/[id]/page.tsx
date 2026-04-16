@@ -110,7 +110,7 @@ export default function SessionPage() {
         if (session.status === "PAUSED" || session.status === "ACTIVE") {
           const r = await api.sessions.reconnect(sessionId);
           setToken(r.livekit_token);
-        } else if (session.status === "COMPLETED") {
+        } else if (session.status === "COMPLETED" || session.status === "EXPIRED") {
           setEnded(true);
         }
         setRoomName(session.room_name);
