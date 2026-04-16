@@ -49,7 +49,7 @@ async def load_session_context(db: AsyncSession, session_id: int) -> dict[str, A
         select(Message)
         .where(Message.session_id == session_id)
         .order_by(Message.id.desc())
-        .limit(40)
+        .limit(20)
     )
     messages = list(reversed(result.scalars().all()))
 
