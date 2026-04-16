@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import get_current_user
+from api.deps import get_current_user, get_current_user_unless_test_utils
 from shared.config import settings
 from shared.db import get_db
 from shared.models import Message, Session, Summary, User
@@ -293,3 +293,28 @@ async def end_session(
 
     background_tasks.add_task(generate_summary, session_id)
     return {"status": "completed"}
+
+
+@router.post("/{session_id}/force-expire")
+async def force_expire_session(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_unless_test_utils),
+):
+    """Force a session into PAUSED with an expired paused_at (E2E / dev). Requires auth unless ENABLE_TEST_UTILS."""
+    session = await db.get(Session, session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    if not settings.enable_test_utils:
+        if current_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated",
+            )
+        if session.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    session.status = SessionStatus.PAUSED
+    session.paused_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    await db.commit()
+    return {"status": "force-expired"}

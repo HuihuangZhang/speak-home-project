@@ -58,7 +58,7 @@ test("Reconnect: expired session (>5 min) shows error and Start New prompt", asy
 
   // Force-expire the session via API (set paused_at to 10 min ago)
   const token = await page.evaluate(() => localStorage.getItem("access_token"));
-  await request.post(`http://localhost:8000/test-utils/sessions/${sessionId}/force-expire`, {
+  await request.post(`http://localhost:8000/sessions/${sessionId}/force-expire`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 

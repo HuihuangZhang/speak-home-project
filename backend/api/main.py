@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,37 +24,3 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(sessions.router)
 app.include_router(summaries.router)
-
-
-# ---------------------------------------------------------------------------
-# Test utilities (only for E2E test convenience — not for production)
-# ---------------------------------------------------------------------------
-
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from shared.db import get_db
-from shared.models import Session as SessionModel
-from shared.session_state import SessionStatus
-
-_test_router = APIRouter(prefix="/test-utils", tags=["test-utils"])
-
-
-@_test_router.post("/sessions/{session_id}/force-expire")
-async def force_expire_session(
-    session_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    """Force a session into PAUSED state with an expired paused_at timestamp.
-    Used only by E2E tests to simulate timeout without waiting.
-    """
-    session = await db.get(SessionModel, session_id)
-    if session is None:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Not found")
-    session.status = SessionStatus.PAUSED
-    session.paused_at = datetime.now(timezone.utc) - timedelta(minutes=10)
-    await db.commit()
-    return {"status": "force-expired"}
-
-
-app.include_router(_test_router)

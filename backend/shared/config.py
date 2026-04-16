@@ -26,5 +26,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./speakhome.db"
     session_pause_timeout_minutes: int = 5
 
+    # When true, POST /sessions/{id}/force-expire skips auth (local/E2E only; never enable in prod)
+    enable_test_utils: bool = False
+
 
 settings = Settings()
