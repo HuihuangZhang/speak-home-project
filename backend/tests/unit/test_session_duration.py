@@ -88,3 +88,21 @@ def test_finalize_completed_while_active():
     ended = _dt("2026-01-01T12:05:00+00:00")
     finalize_completed_session(s, ended)
     assert s.duration_seconds == 300 - 90
+
+
+def test_compute_paused_duration_stable_with_subseconds():
+    # Created at and paused_at with microseconds should yield a stable integer duration
+    created = _dt("2026-04-16T13:03:58.087272+00:00")
+    paused_at = _dt("2026-04-16T13:04:44.416457+00:00")
+
+    # Now can be any time after paused_at; active time should be floor(paused_at - created)
+    now = _dt("2026-04-16T13:05:00.000000+00:00")
+    dur = compute_duration_seconds(
+        created_at=created,
+        ended_at=None,
+        status=SessionStatus.PAUSED,
+        paused_at=paused_at,
+        total_paused_seconds=0,
+        now=now,
+    )
+    assert dur == 46

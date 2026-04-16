@@ -26,13 +26,14 @@ def compute_duration_seconds(
     created = ensure_utc(created_at)
     now_utc = ensure_utc(now)
     wall_end = ensure_utc(ended_at) if status == SessionStatus.COMPLETED and ended_at else now_utc
-    wall_sec = max(0, int((wall_end - created).total_seconds()))
-    pause_extra = 0
+    # Compute using float seconds and floor once at the end to avoid off-by-one jitter
+    wall_seconds = max(0.0, (wall_end - created).total_seconds())
+    open_pause_seconds = 0.0
     if status == SessionStatus.PAUSED and paused_at is not None:
         p = ensure_utc(paused_at)
-        pause_extra = max(0, int((now_utc - p).total_seconds()))
-    pause_total = int(total_paused_seconds) + pause_extra
-    return max(0, wall_sec - pause_total)
+        open_pause_seconds = max(0.0, (now_utc - p).total_seconds())
+    pause_total_seconds = float(total_paused_seconds) + open_pause_seconds
+    return max(0, int(wall_seconds - pause_total_seconds))
 
 
 def accumulate_pause_before_resume(session: Session, resume_at: datetime) -> None:
