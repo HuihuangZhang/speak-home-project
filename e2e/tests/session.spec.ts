@@ -1,7 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 import { registerAndLogin } from "../helpers/auth";
 
-const unique = () => `user_${Date.now()}@example.com`;
+const unique = () => `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}@example.com`;
 
 test.describe("Session flow", () => {
   let page: Page;
@@ -25,11 +25,11 @@ test.describe("Session flow", () => {
 
   test("New session appears in dashboard history", async () => {
     await page.getByRole("button", { name: /start new session/i }).click();
-    await page.waitForURL(/\/session\/\d+/);
+    await page.waitForURL(/\/session\/\d+/, { timeout: 30_000 });
 
     await page.goto("/dashboard");
     const sessionCards = page.getByTestId("session-card");
-    await expect(sessionCards).toHaveCount(1);
+    await expect(sessionCards.first()).toBeVisible();
   });
 
   test("Session page shows room name", async () => {

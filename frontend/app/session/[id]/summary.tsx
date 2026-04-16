@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { formatDurationSeconds } from "@/lib/formatDuration";
 
 interface SummaryData {
   exercises: string[] | null;
@@ -12,6 +13,14 @@ interface SummaryData {
 export function SessionSummary({ sessionId }: { sessionId: number }) {
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [polling, setPolling] = useState(true);
+  const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
+
+  useEffect(() => {
+    api.sessions
+      .get(sessionId)
+      .then((s) => setDurationSeconds(s.duration_seconds))
+      .catch(() => setDurationSeconds(null));
+  }, [sessionId]);
 
   useEffect(() => {
     if (!polling) return;
@@ -44,6 +53,12 @@ export function SessionSummary({ sessionId }: { sessionId: number }) {
   return (
     <div data-testid="summary-card" style={{ background: "#fff", borderRadius: 12, padding: 24, marginTop: 24 }}>
       <h2 style={{ marginTop: 0 }}>Session Summary</h2>
+
+      {durationSeconds !== null && (
+        <p data-testid="summary-duration" style={{ fontSize: 15, color: "#374151", marginBottom: 16 }}>
+          Active time: <strong>{formatDurationSeconds(durationSeconds)}</strong>
+        </p>
+      )}
 
       <div data-testid="summary-exercises">
         <h3 style={{ fontSize: 15, color: "#374151" }}>Exercises Covered</h3>

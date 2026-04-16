@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { registerAndLogin } from "../helpers/auth";
 
-const unique = () => `user_${Date.now()}@example.com`;
+const unique = () => `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}@example.com`;
 
 test("Reconnect: navigating away and back within 5 minutes resumes session", async ({
   browser,
@@ -11,8 +11,10 @@ test("Reconnect: navigating away and back within 5 minutes resumes session", asy
   await registerAndLogin(page, email, "StrongPass123!");
 
   // Start a session
-  await page.getByRole("button", { name: /start new session/i }).click();
-  await page.waitForURL(/\/session\/(\d+)/);
+  const startBtn = page.getByRole("button", { name: /start new session/i });
+  await expect(startBtn).toBeVisible();
+  await startBtn.click();
+  await page.waitForURL(/\/session\/(\d+)/, { timeout: 30_000 });
   const sessionUrl = page.url();
   const sessionId = sessionUrl.match(/\/session\/(\d+)/)![1];
 
@@ -30,6 +32,7 @@ test("Reconnect: navigating away and back within 5 minutes resumes session", asy
     .getByTestId("session-card")
     .filter({ has: page.getByTestId(`session-card-${sessionId}`) });
   await expect(sessionCard).toBeVisible();
+  await expect(sessionCard.getByTestId("session-duration")).toBeVisible();
   await expect(sessionCard.getByRole("button", { name: /resume/i })).toBeVisible();
 
   // Click Resume
@@ -52,13 +55,15 @@ test("Reconnect: expired session (>5 min) shows error and Start New prompt", asy
   await registerAndLogin(page, email, "StrongPass123!");
 
   // Start a session
-  await page.getByRole("button", { name: /start new session/i }).click();
-  await page.waitForURL(/\/session\/(\d+)/);
+  const startBtn = page.getByRole("button", { name: /start new session/i });
+  await expect(startBtn).toBeVisible();
+  await startBtn.click();
+  await page.waitForURL(/\/session\/(\d+)/, { timeout: 30_000 });
   const sessionId = page.url().match(/\/session\/(\d+)/)![1];
 
   // Force-expire the session via API (set paused_at to 10 min ago)
   const token = await page.evaluate(() => localStorage.getItem("access_token"));
-  await request.post(`http://localhost:8000/test-utils/sessions/${sessionId}/force-expire`, {
+  await request.post(`http://localhost:8000/sessions/${sessionId}/force-expire`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 

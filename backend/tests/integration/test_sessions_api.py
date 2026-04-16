@@ -49,6 +49,8 @@ async def test_get_sessions_list(client, auth_headers, mock_livekit):
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["items"]) == 2
+    for item in body["items"]:
+        assert "duration_seconds" in item
 
 
 async def test_get_session_by_id(client, auth_headers, mock_livekit):
@@ -56,7 +58,10 @@ async def test_get_session_by_id(client, auth_headers, mock_livekit):
     session_id = create_resp.json()["session_id"]
     resp = await client.get(f"/sessions/{session_id}", headers=auth_headers)
     assert resp.status_code == 200
-    assert resp.json()["id"] == session_id
+    body = resp.json()
+    assert body["id"] == session_id
+    assert "duration_seconds" in body
+    assert isinstance(body["duration_seconds"], int)
 
 
 async def test_get_session_wrong_user_returns_403(client, auth_headers, mock_livekit):
@@ -89,6 +94,9 @@ async def test_reconnect_paused_session_succeeds(client, auth_headers, mock_live
     body = resp.json()
     assert "livekit_token" in body
     assert body["status"] == "ACTIVE"
+    await db_session.refresh(session)
+    assert session.total_paused_seconds >= 0
+    assert session.paused_at is None
 
 
 async def test_reconnect_expired_paused_session_returns_409(client, auth_headers, mock_livekit, db_session):
@@ -141,3 +149,8 @@ async def test_end_session_sets_completed(client, auth_headers, mock_livekit, db
     assert resp.status_code == 200
     await db_session.refresh(session)
     assert session.status == SessionStatus.COMPLETED
+    assert session.duration_seconds is not None
+    assert session.duration_seconds >= 0
+
+    detail = await client.get(f"/sessions/{session_id}", headers=auth_headers)
+    assert detail.json()["duration_seconds"] == session.duration_seconds

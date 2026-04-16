@@ -1,4 +1,4 @@
-import { Page } from "@playwright/test";
+import { expect, Page } from "@playwright/test";
 
 export async function registerAndLogin(
   page: Page,
@@ -10,8 +10,11 @@ export async function registerAndLogin(
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Register" }).click();
-  // After register, should redirect to dashboard
-  await page.waitForURL("**/dashboard");
+  // Next.js client navigation may not trigger a full "load" event; assert URL directly.
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+  await page.waitForFunction(() => !!localStorage.getItem("access_token"), null, {
+    timeout: 10_000,
+  });
 }
 
 export async function login(
@@ -23,5 +26,8 @@ export async function login(
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Login" }).click();
-  await page.waitForURL("**/dashboard");
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+  await page.waitForFunction(() => !!localStorage.getItem("access_token"), null, {
+    timeout: 10_000,
+  });
 }

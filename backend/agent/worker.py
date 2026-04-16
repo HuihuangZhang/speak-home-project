@@ -24,6 +24,7 @@ from agent.summary import generate_summary
 from shared.config import settings
 from shared.db import AsyncSessionLocal
 from shared.models import Session
+from shared.session_duration import finalize_completed_session
 from shared.session_state import SessionStatus
 
 logger = logging.getLogger(__name__)
@@ -194,8 +195,10 @@ async def entrypoint(ctx: JobContext) -> None:
                 session_obj = await db.get(Session, session_id)
                 if session_obj and session_obj.status == SessionStatus.PAUSED:
                     logger.info("Reconnect timeout — completing session | session_id=%d", session_id)
+                    ended_at = datetime.now(timezone.utc)
+                    finalize_completed_session(session_obj, ended_at)
                     session_obj.status = SessionStatus.COMPLETED
-                    session_obj.ended_at = datetime.now(timezone.utc)
+                    session_obj.ended_at = ended_at
                     await db.commit()
                 else:
                     logger.info("Session reconnected or already completed | session_id=%d", session_id)

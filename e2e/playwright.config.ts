@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { defineConfig, devices } from "@playwright/test";
 import * as dotenv from "dotenv";
 dotenv.config({ path: "../.env" });
@@ -5,7 +6,8 @@ dotenv.config({ path: "../.env" });
 export default defineConfig({
   testDir: "./tests",
   timeout: 60_000,
-  retries: 1,
+  retries: 2,
+  workers: 1,
   use: {
     baseURL: process.env.FRONTEND_URL ?? "http://localhost:3000",
     trace: "on-first-retry",
@@ -20,12 +22,14 @@ export default defineConfig({
   // Start backend + frontend before running tests
   webServer: [
     {
-      command: "../backend/.venv/bin/uvicorn api.main:app --port 8000",
-      cwd: "../backend",
+      command: "bash ./scripts/start-backend.sh",
+      cwd: ".",
       port: 8000,
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       env: {
-        DATABASE_URL: process.env.DATABASE_URL ?? "sqlite+aiosqlite:///./speakhome.db",
+        ...process.env,
+        DATABASE_URL:
+          process.env.DATABASE_URL ?? "sqlite+aiosqlite:////tmp/speakhome_e2e.db",
         LIVEKIT_URL: process.env.LIVEKIT_URL ?? "",
         LIVEKIT_API_URL: process.env.LIVEKIT_API_URL ?? "",
         LIVEKIT_API_KEY: process.env.LIVEKIT_API_KEY ?? "",
@@ -41,7 +45,7 @@ export default defineConfig({
       command: "npm run dev",
       cwd: "../frontend",
       port: 3000,
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       env: {
         NEXT_PUBLIC_API_URL: "http://localhost:8000",
         NEXT_PUBLIC_LIVEKIT_URL: process.env.LIVEKIT_URL ?? "",

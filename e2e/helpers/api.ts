@@ -7,7 +7,7 @@ export async function forceExpireSession(
   token: string,
   sessionId: string
 ) {
-  return request.post(`${API_URL}/test-utils/sessions/${sessionId}/force-expire`, {
+  return request.post(`${API_URL}/sessions/${sessionId}/force-expire`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
