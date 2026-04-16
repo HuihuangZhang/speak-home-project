@@ -114,6 +114,10 @@ async def test_reconnect_expired_paused_session_returns_409(client, auth_headers
     assert resp.status_code == 409
     assert "expired" in resp.json()["detail"].lower()
 
+    await db_session.refresh(session)
+    assert session.status == SessionStatus.EXPIRED
+    assert session.ended_at is not None
+
 
 async def test_reconnect_completed_session_returns_409(client, auth_headers, mock_livekit, db_session):
     create_resp = await client.post("/sessions", headers=auth_headers)

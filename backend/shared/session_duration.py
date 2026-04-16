@@ -63,7 +63,7 @@ def finalize_completed_session(session: Session, ended_at: datetime) -> None:
 
 def duration_seconds_for_api(session: Session, now: datetime) -> int:
     """Value exposed on list/detail: stored when completed, else computed live."""
-    if session.status == SessionStatus.COMPLETED:
+    if session.status in (SessionStatus.COMPLETED, SessionStatus.EXPIRED):
         if session.duration_seconds is not None:
             return int(session.duration_seconds)
         return compute_duration_seconds(

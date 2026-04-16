@@ -84,11 +84,13 @@ export default function DashboardPage() {
             >
               <div data-testid={`session-card-${s.id}`}>
                 <p style={{ margin: 0, fontWeight: 600 }}>{s.room_name}</p>
-                <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280", textTransform: "capitalize" }}>{s.status.toLowerCase()}</p>
+                <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280", textTransform: "capitalize" }}>
+                  { s.status.toLowerCase() }
+                </p>
                 <p style={{ margin: "4px 0 0", fontSize: 13, color: "#4b5563" }} data-testid="session-duration">
                   Active time: {formatDurationSeconds(s.duration_seconds)}
                 </p>
-                {s.status === "COMPLETED" && (
+                {(s.status === "COMPLETED" || s.status === "EXPIRED") && (
                   <a href={`/session/${s.id}?summary=1`} style={{ fontSize: 13, color: "#6366f1" }}>View Summary</a>
                 )}
               </div>

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -269,6 +270,17 @@ async def reconnect_session(
             tzinfo=timezone.utc
         ) if session.paused_at.tzinfo is None else datetime.now(timezone.utc) - session.paused_at
         if elapsed > timedelta(minutes=settings.session_pause_timeout_minutes):
+            ended_at = datetime.now(timezone.utc)
+            finalize_completed_session(session, ended_at)
+            session.status = SessionStatus.EXPIRED
+            session.ended_at = ended_at
+            await db.commit()
+
+            # Generate summary even though we're returning an error response.
+            from agent.summary import generate_summary  # avoid circular at module level
+
+            asyncio.create_task(generate_summary(session_id))
+
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Session has expired — please start a new session",

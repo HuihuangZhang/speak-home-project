@@ -194,10 +194,10 @@ async def entrypoint(ctx: JobContext) -> None:
             async with AsyncSessionLocal() as db:
                 session_obj = await db.get(Session, session_id)
                 if session_obj and session_obj.status == SessionStatus.PAUSED:
-                    logger.info("Reconnect timeout — completing session | session_id=%d", session_id)
+                    logger.info("Reconnect timeout — expiring session | session_id=%d", session_id)
                     ended_at = datetime.now(timezone.utc)
                     finalize_completed_session(session_obj, ended_at)
-                    session_obj.status = SessionStatus.COMPLETED
+                    session_obj.status = SessionStatus.EXPIRED
                     session_obj.ended_at = ended_at
                     await db.commit()
                 else:

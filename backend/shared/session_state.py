@@ -7,13 +7,15 @@ class SessionStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
     COMPLETED = "COMPLETED"
+    EXPIRED = "EXPIRED"
 
 
 _VALID_TRANSITIONS: Dict[SessionStatus, Set[SessionStatus]] = {
     SessionStatus.CREATED: {SessionStatus.ACTIVE},
-    SessionStatus.ACTIVE: {SessionStatus.PAUSED, SessionStatus.COMPLETED},
-    SessionStatus.PAUSED: {SessionStatus.ACTIVE, SessionStatus.COMPLETED},
+    SessionStatus.ACTIVE: {SessionStatus.PAUSED, SessionStatus.COMPLETED, SessionStatus.EXPIRED},
+    SessionStatus.PAUSED: {SessionStatus.ACTIVE, SessionStatus.COMPLETED, SessionStatus.EXPIRED},
     SessionStatus.COMPLETED: set(),
+    SessionStatus.EXPIRED: set(),
 }
 
 
