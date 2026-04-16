@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { registerAndLogin } from "../helpers/auth";
 
-const unique = () => `user_${Date.now()}@example.com`;
+const unique = () => `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}@example.com`;
 
 test("Summary card appears after ending session", async ({ browser }) => {
   const page = await browser.newPage();
