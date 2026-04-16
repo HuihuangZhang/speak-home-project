@@ -49,13 +49,24 @@ export const api = {
         { method: "POST" }
       ),
     list: () =>
-      request<{ items: Array<{ id: number; room_name: string; status: string; started_at: string | null }> }>(
-        "/sessions"
-      ),
+      request<{
+        items: Array<{
+          id: number;
+          room_name: string;
+          status: string;
+          started_at: string | null;
+          ended_at: string | null;
+          duration_seconds: number;
+        }>;
+      }>("/sessions"),
     get: (id: number) =>
-      request<{ id: number; room_name: string; status: string; exercise_plan: unknown }>(
-        `/sessions/${id}`
-      ),
+      request<{
+        id: number;
+        room_name: string;
+        status: string;
+        exercise_plan: unknown;
+        duration_seconds: number;
+      }>(`/sessions/${id}`),
     reconnect: (id: number) =>
       request<{ livekit_token: string; status: string }>(`/sessions/${id}/reconnect`, {
         method: "POST",

@@ -47,6 +47,8 @@ class Session(Base):
     paused_at = Column(DateTime(timezone=True), nullable=True)
     ended_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
+    total_paused_seconds = Column(Integer, nullable=False, default=0)
+    duration_seconds = Column(Integer, nullable=True)
 
     user = relationship("User", back_populates="sessions")
     messages = relationship("Message", back_populates="session")

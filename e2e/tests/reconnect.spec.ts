@@ -30,6 +30,7 @@ test("Reconnect: navigating away and back within 5 minutes resumes session", asy
     .getByTestId("session-card")
     .filter({ has: page.getByTestId(`session-card-${sessionId}`) });
   await expect(sessionCard).toBeVisible();
+  await expect(sessionCard.getByTestId("session-duration")).toBeVisible();
   await expect(sessionCard.getByRole("button", { name: /resume/i })).toBeVisible();
 
   // Click Resume

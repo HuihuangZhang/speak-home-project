@@ -20,11 +20,12 @@ export default defineConfig({
   // Start backend + frontend before running tests
   webServer: [
     {
-      command: "../backend/.venv/bin/uvicorn api.main:app --port 8000",
-      cwd: "../backend",
+      command: "bash ./scripts/start-backend.sh",
+      cwd: ".",
       port: 8000,
       reuseExistingServer: true,
       env: {
+        ...process.env,
         DATABASE_URL: process.env.DATABASE_URL ?? "sqlite+aiosqlite:///./speakhome.db",
         LIVEKIT_URL: process.env.LIVEKIT_URL ?? "",
         LIVEKIT_API_URL: process.env.LIVEKIT_API_URL ?? "",
